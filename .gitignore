@@ -1,0 +1,19 @@
+# Ignorar ambientes virtuais
+venv/
+.env
+
+# Ignorar dependências
+node_modules/
+
+# Ignorar arquivos temporários do sistema
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Ignorar cache do Python
+__pycache__/
+*.pyc
+
+# Ignorar dataset
+data/
