@@ -89,6 +89,13 @@ def train_model(*, epochs: int, batch_size: int, workers: int, imgsz: int) -> Di
     """Run a compact YOLOv8 training with conservative, stable settings."""
     device = pick_device()
     logger.info(f"Training on device: {device}")
+    
+    # Clear GPU cache to free up memory
+    try:
+        import torch
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
 
     # Create dataset YAML
     yaml_path = Path("wider_face.yaml")
