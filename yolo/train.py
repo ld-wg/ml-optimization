@@ -114,7 +114,6 @@ def train_model(*, epochs: int, batch_size: int, workers: int, imgsz: int) -> Di
         project="runs/train",
         name=experiment,
         exist_ok=True,
-        amp=False,        # safer for CPU/MPS
         optimizer="auto",
         mosaic=0.0,
         mixup=0.0,
@@ -126,9 +125,8 @@ def train_model(*, epochs: int, batch_size: int, workers: int, imgsz: int) -> Di
         shear=0.0,
         perspective=0.0,
         rect=False,
-        cache=False,
         save_period=1,
-        patience=20,
+        patience=10,
         cos_lr=True,
         deterministic=True,
         seed=42,
