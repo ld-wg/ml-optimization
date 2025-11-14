@@ -95,6 +95,10 @@ def train_model(
     sam_rho: float,
     lion_beta1: float,
     lion_beta2: float,
+    lr0: float,
+    weight_decay: float,
+    warmup_epochs: float,
+    patience: int,
 ) -> Dict[str, Any]:
     """Run a compact YOLOv8 training with conservative, stable settings."""
     device = pick_device()
@@ -144,7 +148,10 @@ def train_model(
         perspective=0.0,
         rect=False,
         save_period=1,
-        patience=10,
+        patience=patience,
+        lr0=lr0,
+        weight_decay=weight_decay,
+        warmup_epochs=warmup_epochs,
         cos_lr=True,
         deterministic=True,
         seed=42,
@@ -210,6 +217,10 @@ def main() -> None:
     p.add_argument("--sam-rho", type=float, default=0.05, help="SAM neighborhood radius")
     p.add_argument("--lion-beta1", type=float, default=0.9, help="Lion beta1 (momentum-like)")
     p.add_argument("--lion-beta2", type=float, default=0.99, help="Lion beta2")
+    p.add_argument("--lr0", type=float, default=0.01, help="Initial learning rate (Ultralytics lr0)")
+    p.add_argument("--weight-decay", type=float, default=0.0005, help="Weight decay (Ultralytics weight_decay)")
+    p.add_argument("--warmup-epochs", type=float, default=3.0, help="Number of warmup epochs")
+    p.add_argument("--patience", type=int, default=10, help="Early stopping patience (0 disables)")
     args = p.parse_args()
 
     logger.info("=" * 64)
@@ -280,6 +291,10 @@ def main() -> None:
             sam_rho=args.sam_rho,
             lion_beta1=args.lion_beta1,
             lion_beta2=args.lion_beta2,
+            lr0=args.lr0,
+            weight_decay=args.weight_decay,
+            warmup_epochs=args.warmup_epochs,
+            patience=args.patience,
         )
         if not results.get("success"):
             sys.exit(1)
