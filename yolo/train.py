@@ -85,7 +85,17 @@ def write_dataset_yaml(yaml_path: Path, dataset_dir: Path) -> None:
     yaml_path.write_text(yaml.dump(data, sort_keys=False))
 
 
-def train_model(*, epochs: int, batch_size: int, workers: int, imgsz: int) -> Dict[str, Any]:
+def train_model(
+    *,
+    epochs: int,
+    batch_size: int,
+    workers: int,
+    imgsz: int,
+    optimizer_name: str,
+    sam_rho: float,
+    lion_beta1: float,
+    lion_beta2: float,
+) -> Dict[str, Any]:
     """Run a compact YOLOv8 training with conservative, stable settings."""
     device = pick_device()
     logger.info(f"Training on device: {device}")
@@ -101,17 +111,18 @@ def train_model(*, epochs: int, batch_size: int, workers: int, imgsz: int) -> Di
     yaml_path = Path("wider_face.yaml")
     write_dataset_yaml(yaml_path, DATASET_DIR)
 
-    # Experiment name
+    # Experiment name (optionally tag optimizer)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    experiment = f"train_{epochs}ep_{timestamp}"
+    optimizer_key = (optimizer_name or "auto").lower()
+    optimizer_tag = f"_{optimizer_key}" if optimizer_key != "auto" else ""
+    experiment = f"train{optimizer_tag}_{epochs}ep_{timestamp}"
 
     # Load model
     model = YOLO(MODEL_FILE)
     logger.info(f"Starting training: {experiment}")
     logger.info(f"Dataset YAML: {yaml_path}")
 
-    # Conservative/portable training args for CPU/MPS/CUDA
-    results = model.train(
+    train_kwargs = dict(
         data=str(yaml_path),
         epochs=epochs,
         imgsz=imgsz,
@@ -121,7 +132,7 @@ def train_model(*, epochs: int, batch_size: int, workers: int, imgsz: int) -> Di
         project="runs/train",
         name=experiment,
         exist_ok=True,
-        optimizer="auto",
+        optimizer=optimizer_key,
         mosaic=0.0,
         mixup=0.0,
         copy_paste=0.0,
@@ -138,6 +149,23 @@ def train_model(*, epochs: int, batch_size: int, workers: int, imgsz: int) -> Di
         deterministic=True,
         seed=42,
     )
+
+    if optimizer_key in {"sam", "lion"}:
+        from optimizers.custom_trainer import CustomDetectionTrainer
+
+        train_kwargs.update(
+            {
+                "trainer": CustomDetectionTrainer,
+                "sam_rho": sam_rho,
+                "lion_beta1": lion_beta1,
+                "lion_beta2": lion_beta2,
+            }
+        )
+        if optimizer_key == "sam":
+            train_kwargs["nbs"] = batch_size
+
+    # Conservative/portable training args for CPU/MPS/CUDA
+    results = model.train(**train_kwargs)
 
     # Locate best weights
     model_path = Path("runs/train") / experiment / "weights" / "best.pt"
@@ -173,6 +201,15 @@ def main() -> None:
     p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Batch size")
     p.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help="Data loader workers")
     p.add_argument("--imgsz", type=int, default=DEFAULT_IMGSZ, help="Image size")
+    p.add_argument(
+        "--optimizer",
+        type=str,
+        default="auto",
+        help="Optimizer to use (auto, SGD, AdamW, Lion, SAM)",
+    )
+    p.add_argument("--sam-rho", type=float, default=0.05, help="SAM neighborhood radius")
+    p.add_argument("--lion-beta1", type=float, default=0.9, help="Lion beta1 (momentum-like)")
+    p.add_argument("--lion-beta2", type=float, default=0.99, help="Lion beta2")
     args = p.parse_args()
 
     logger.info("=" * 64)
@@ -239,6 +276,10 @@ def main() -> None:
             batch_size=args.batch_size,
             workers=args.workers,
             imgsz=args.imgsz,
+            optimizer_name=args.optimizer,
+            sam_rho=args.sam_rho,
+            lion_beta1=args.lion_beta1,
+            lion_beta2=args.lion_beta2,
         )
         if not results.get("success"):
             sys.exit(1)
@@ -248,8 +289,8 @@ def main() -> None:
         logger.info(f"  Model:      {results['model_path']}")
         logger.info(f"  mAP50:      {results['val_map50']:.3f}")
         logger.info("=" * 64)
-    except Exception as e:
-        logger.error(f"Training error: {e}")
+    except Exception:
+        logger.exception("Training error")
         sys.exit(1)
 
 
