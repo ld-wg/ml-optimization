@@ -299,7 +299,6 @@ class CustomDetectionTrainer(detect_train.DetectionTrainer):
         self.loss_items = loss_items_backup
 
         # Step 3: restore weights, apply the base optimizer step, and sync EMA.
-        self.scaler.unscale_(base_opt)
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
         optimizer.second_step(zero_grad=False)
         self.scaler.step(base_opt)
