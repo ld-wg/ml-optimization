@@ -54,6 +54,8 @@ class CustomDetectionTrainer(detect_train.DetectionTrainer):
             if extra_args["lion_beta2"] is not None
             else getattr(self.args, "lion_beta2", 0.99)
         )
+        self.sam_grad_clip = float(getattr(self.args, "sam_grad_clip", 5.0))
+        self.sam_grad_log_interval = max(1, int(getattr(self.args, "sam_grad_log_interval", 200)))
 
     # --------------------------------------------------------------------- #
     # Optimizer integration
@@ -282,15 +284,22 @@ class CustomDetectionTrainer(detect_train.DetectionTrainer):
         base_opt = optimizer.base
 
         # Step 1: perturb weights in the gradient direction.
-        scale = self.scaler.get_scale() if self.scaler.is_enabled() else 1.0
-        if scale != 1.0:
-            inv_scale = 1.0 / scale
-            for group in base_opt.param_groups:
-                for p in group["params"]:
-                    if p.grad is None:
-                        continue
-                    p.grad.mul_(inv_scale)
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
+        self.scaler.unscale_(base_opt)
+        step_idx = getattr(self, "_sam_step_index", 0) + 1
+        self._sam_step_index = step_idx
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.sam_grad_clip)
+        if not math.isfinite(grad_norm):
+            LOGGER.warning(
+                f"{colorstr('optimizer:')} SAM grad norm is non-finite ({grad_norm}); skipping step to avoid NaNs"
+            )
+            optimizer.zero_grad()
+            return
+        self._last_sam_grad_norm = float(grad_norm)
+        if RANK in {-1, 0} and step_idx % self.sam_grad_log_interval == 0:
+            LOGGER.info(
+                f"{colorstr('optimizer:')} SAM grad norm (pre-perturb) {self._last_sam_grad_norm:.3f} "
+                f"(clip={self.sam_grad_clip})"
+            )
         optimizer.first_step(zero_grad=True)
 
         # Step 2: recompute loss at the perturbed point.
@@ -307,7 +316,7 @@ class CustomDetectionTrainer(detect_train.DetectionTrainer):
 
         # Step 3: restore weights, apply the base optimizer step, and sync EMA.
         self.scaler.unscale_(base_opt)
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.sam_grad_clip)
         optimizer.second_step(zero_grad=False)
         self.scaler.step(base_opt)
         self.scaler.update()
