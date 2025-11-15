@@ -170,6 +170,7 @@ def train_model(
         )
         if optimizer_key == "sam":
             train_kwargs["nbs"] = batch_size
+            train_kwargs["amp"] = False
 
     # Conservative/portable training args for CPU/MPS/CUDA
     results = model.train(**train_kwargs)
