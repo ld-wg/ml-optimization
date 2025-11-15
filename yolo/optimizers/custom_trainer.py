@@ -282,7 +282,14 @@ class CustomDetectionTrainer(detect_train.DetectionTrainer):
         base_opt = optimizer.base
 
         # Step 1: perturb weights in the gradient direction.
-        self.scaler.unscale_(base_opt)
+        scale = self.scaler.get_scale() if self.scaler.is_enabled() else 1.0
+        if scale != 1.0:
+            inv_scale = 1.0 / scale
+            for group in base_opt.param_groups:
+                for p in group["params"]:
+                    if p.grad is None:
+                        continue
+                    p.grad.mul_(inv_scale)
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
         optimizer.first_step(zero_grad=True)
 
@@ -299,6 +306,7 @@ class CustomDetectionTrainer(detect_train.DetectionTrainer):
         self.loss_items = loss_items_backup
 
         # Step 3: restore weights, apply the base optimizer step, and sync EMA.
+        self.scaler.unscale_(base_opt)
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
         optimizer.second_step(zero_grad=False)
         self.scaler.step(base_opt)
